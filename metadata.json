@@ -1,0 +1,6 @@
+{
+  "name": "ARMUN Edition 2 - Judges Evaluation System",
+  "description": "Model UN judging portal for Amara Raja Vidyalayams ARMUN Edition 2",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
