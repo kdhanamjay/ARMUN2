@@ -69,7 +69,7 @@ export const RUBRIC_CRITERIA: RubricCriterion[] = [
   },
   {
     id: 'relevance',
-    name: 'Relevance',
+    name: 'Relevance & Resolution',
     maxMarks: 10,
     description: 'Relevance of solutions, alignment with state policy, and constructive contributions.'
   },
