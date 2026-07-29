@@ -168,6 +168,19 @@ export default function App() {
     await loadAdminData();
   };
 
+  const handleBulkImportDelegates = async (payload: {
+    action: 'bulk_append' | 'bulk_replace' | 'bulk_replace_committee';
+    delegatesList: Delegate[];
+    committeeId?: CommitteeId;
+  }) => {
+    await fetch('/api/admin/delegate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    await loadAdminData();
+  };
+
   const handleUpdatePins = async (payload: { newAdminPin?: string; newJudgePins?: Record<string, string> }) => {
     await fetch('/api/admin/update-pins', {
       method: 'POST',
@@ -249,6 +262,7 @@ export default function App() {
           onAddDelegate={handleAddDelegate}
           onEditDelegate={handleEditDelegate}
           onDeleteDelegate={handleDeleteDelegate}
+          onBulkImportDelegates={handleBulkImportDelegates}
           onUpdatePins={handleUpdatePins}
           onResetScores={handleResetScores}
           onOpenPhpExporter={() => setShowPhpExporter(true)}

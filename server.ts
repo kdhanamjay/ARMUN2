@@ -354,6 +354,18 @@ async function startServer() {
       return res.json({ success: true, delegates: store.delegates });
     }
 
+    if ((action === 'bulk_append' || action === 'bulk_add') && Array.isArray(delegatesList)) {
+      store.delegates = [...store.delegates, ...delegatesList];
+      saveStore(store);
+      return res.json({ success: true, delegates: store.delegates });
+    }
+
+    if (action === 'bulk_replace_committee' && req.body.committeeId && Array.isArray(delegatesList)) {
+      store.delegates = store.delegates.filter((d) => d.committeeId !== req.body.committeeId).concat(delegatesList);
+      saveStore(store);
+      return res.json({ success: true, delegates: store.delegates });
+    }
+
     res.status(400).json({ success: false, message: 'Invalid delegate action' });
   });
 

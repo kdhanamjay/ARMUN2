@@ -21,6 +21,11 @@ import {
   Sparkles,
   Clock,
   Lock,
+  Upload,
+  FileUp,
+  RotateCcw,
+  AlertTriangle,
+  FileText,
 } from 'lucide-react';
 import { exportCredentialsPDF } from '../utils/pdfCredentialsExporter';
 
@@ -34,6 +39,11 @@ interface AdminDashboardProps {
   onAddDelegate: (delegate: Partial<Delegate>) => Promise<void>;
   onEditDelegate: (delegate: Delegate) => Promise<void>;
   onDeleteDelegate: (delegateId: string) => Promise<void>;
+  onBulkImportDelegates?: (payload: {
+    action: 'bulk_append' | 'bulk_replace' | 'bulk_replace_committee';
+    delegatesList: Delegate[];
+    committeeId?: CommitteeId;
+  }) => Promise<void>;
   onUpdatePins: (payload: { newAdminPin?: string; newJudgePins?: Record<string, string> }) => Promise<void>;
   onResetScores: (committeeId?: CommitteeId) => Promise<void>;
   onOpenPhpExporter: () => void;
@@ -59,7 +69,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAddDelegate,
   onEditDelegate,
   onDeleteDelegate,
+  onBulkImportDelegates,
   onUpdatePins,
+  onResetScores,
   onOpenPhpExporter,
   onOpenPrintModal,
   onUpdateScore,
@@ -71,6 +83,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Search filter for delegates
   const [delegateSearchQuery, setDelegateSearchQuery] = useState('');
+
+  // Bulk Import Delegates State
+  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+  const [bulkRawText, setBulkRawText] = useState('');
+  const [bulkImportMode, setBulkImportMode] = useState<'append' | 'replace_committee' | 'replace_all'>('append');
+  const [bulkTargetCommittee, setBulkTargetCommittee] = useState<CommitteeId>('UNSC');
+  const [isImportingBulk, setIsImportingBulk] = useState(false);
+  const [bulkImportStatusMsg, setBulkImportStatusMsg] = useState<string | null>(null);
+
+  // Reset Judges Marks State
+  const [showResetMarksModal, setShowResetMarksModal] = useState(false);
+  const [resetTargetCommittee, setResetTargetCommittee] = useState<string>('ALL');
+  const [isResettingScores, setIsResettingScores] = useState(false);
+  const [resetStatusMsg, setResetStatusMsg] = useState<string | null>(null);
 
   // Schedule state
   const formatForDatetimeLocal = (dateStr?: string | null): string => {
@@ -302,6 +328,172 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  // --- BULK DELEGATE IMPORT PARSER & HANDLERS ---
+  const parseBulkText = (text: string, defaultCommittee: CommitteeId): Delegate[] => {
+    if (!text.trim()) return [];
+    const lines = text.split(/\r?\n/).map((l) => l.trim()).filter((l) => l.length > 0);
+    const parsed: Delegate[] = [];
+    let currentSlNo = 1;
+
+    lines.forEach((line) => {
+      let parts: string[] = [];
+      if (line.includes('\t')) {
+        parts = line.split('\t');
+      } else if (line.includes(';')) {
+        parts = line.split(';');
+      } else {
+        parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
+      }
+
+      parts = parts.map((p) => p.replace(/^["']|["']$/g, '').trim());
+      if (parts.length < 2) return;
+
+      const firstColLower = parts[0].toLowerCase();
+      const secondColLower = (parts[1] || '').toLowerCase();
+
+      // Skip CSV headers
+      if (
+        firstColLower.includes('sl') ||
+        firstColLower.includes('s.no') ||
+        firstColLower.includes('no.') ||
+        firstColLower.includes('committee') ||
+        secondColLower.includes('delegate') ||
+        secondColLower.includes('name') ||
+        secondColLower.includes('portfolio')
+      ) {
+        return;
+      }
+
+      let slNo = currentSlNo;
+      let committeeId: CommitteeId = defaultCommittee;
+      let delegateName = '';
+      let portfolio = '';
+
+      if (parts.length >= 4) {
+        const parsedSl = parseInt(parts[0], 10);
+        if (!isNaN(parsedSl)) slNo = parsedSl;
+        const parsedComm = parts[1].toUpperCase();
+        if (parsedComm) committeeId = parsedComm as CommitteeId;
+        delegateName = parts[2];
+        portfolio = parts[3];
+      } else if (parts.length === 3) {
+        const parsedSl = parseInt(parts[0], 10);
+        if (!isNaN(parsedSl)) {
+          slNo = parsedSl;
+          delegateName = parts[1];
+          portfolio = parts[2];
+        } else {
+          const parsedComm = parts[0].toUpperCase();
+          committeeId = parsedComm as CommitteeId;
+          delegateName = parts[1];
+          portfolio = parts[2];
+        }
+      } else if (parts.length === 2) {
+        delegateName = parts[0];
+        portfolio = parts[1];
+      }
+
+      if (delegateName && portfolio) {
+        parsed.push({
+          id: `del_import_${Date.now()}_${Math.random().toString(36).substring(2, 6)}_${Math.floor(Math.random() * 1000)}`,
+          slNo,
+          committeeId,
+          delegateName,
+          portfolio,
+        });
+        currentSlNo++;
+      }
+    });
+
+    return parsed;
+  };
+
+  const parsedBulkDelegates = parseBulkText(bulkRawText, bulkTargetCommittee);
+
+  const handleExecuteBulkImport = async () => {
+    if (parsedBulkDelegates.length === 0) {
+      alert('No valid delegates found in the input. Please ensure data has Name and Portfolio/Country separated by commas or tabs!');
+      return;
+    }
+
+    setIsImportingBulk(true);
+    setBulkImportStatusMsg(null);
+
+    try {
+      if (onBulkImportDelegates) {
+        if (bulkImportMode === 'append') {
+          await onBulkImportDelegates({
+            action: 'bulk_append',
+            delegatesList: parsedBulkDelegates,
+          });
+        } else if (bulkImportMode === 'replace_committee') {
+          await onBulkImportDelegates({
+            action: 'bulk_replace_committee',
+            delegatesList: parsedBulkDelegates,
+            committeeId: bulkTargetCommittee,
+          });
+        } else if (bulkImportMode === 'replace_all') {
+          await onBulkImportDelegates({
+            action: 'bulk_replace',
+            delegatesList: parsedBulkDelegates,
+          });
+        }
+      } else {
+        for (const del of parsedBulkDelegates) {
+          await onAddDelegate(del);
+        }
+      }
+
+      setBulkImportStatusMsg(`🟢 Successfully imported ${parsedBulkDelegates.length} delegates!`);
+      setTimeout(() => {
+        setBulkImportStatusMsg(null);
+        setShowBulkImportModal(false);
+        setBulkRawText('');
+      }, 1800);
+    } catch (e) {
+      alert('Error performing bulk import. Please try again.');
+    } finally {
+      setIsImportingBulk(false);
+    }
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (content) {
+        setBulkRawText(content);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // --- RESET JUDGES MARKS HANDLER ---
+  const handleExecuteResetMarks = async () => {
+    setIsResettingScores(true);
+    setResetStatusMsg(null);
+    try {
+      if (resetTargetCommittee === 'ALL') {
+        await onResetScores();
+        setResetStatusMsg('🟢 All judge marks cleared successfully in one single shot!');
+      } else {
+        await onResetScores(resetTargetCommittee as CommitteeId);
+        setResetStatusMsg(`🟢 All judge marks for committee ${resetTargetCommittee} cleared successfully!`);
+      }
+      setTimeout(() => {
+        setResetStatusMsg(null);
+        setShowResetMarksModal(false);
+      }, 1800);
+    } catch (err) {
+      alert('Failed to reset scores.');
+    } finally {
+      setIsResettingScores(false);
+    }
+  };
+
   // Handle PIN update save
   const handleSavePinChanges = async () => {
     try {
@@ -366,6 +558,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={() => {
+                setBulkTargetCommittee(selectedCommittee);
+                setShowBulkImportModal(true);
+              }}
+              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm shadow-emerald-900/30"
+              title="Bulk import delegates via CSV, Excel paste, or TXT file"
+            >
+              <Upload className="w-4 h-4 text-white" />
+              <span>Bulk Import Delegates</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setResetTargetCommittee('ALL');
+                setShowResetMarksModal(true);
+              }}
+              className="flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm shadow-rose-900/30"
+              title="Clear all entered judge marks in one single shot"
+            >
+              <RotateCcw className="w-4 h-4 text-white" />
+              <span>Reset Judges Marks</span>
+            </button>
+
             <button
               onClick={() => exportCredentialsPDF(editAdminPin, editJudgePins, committeesList)}
               className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs px-3.5 py-2 rounded-xl font-bold transition shadow-sm shadow-amber-500/20"
@@ -846,9 +1062,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl text-xs transition shadow-xs flex items-center justify-center gap-2"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>{isAdding ? 'Adding...' : 'Add Delegate'}</span>
+                  <span>{isAdding ? 'Adding...' : 'Add Single Delegate'}</span>
                 </button>
               </form>
+
+              <div className="pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBulkTargetCommittee(selectedCommittee);
+                    setShowBulkImportModal(true);
+                  }}
+                  className="w-full bg-slate-900 hover:bg-slate-800 text-amber-300 font-bold py-2.5 px-4 rounded-xl text-xs transition shadow-xs flex items-center justify-center gap-2 border border-amber-400/30"
+                >
+                  <Upload className="w-4 h-4 text-amber-300" />
+                  <span>Bulk Import Delegates (CSV / Text)</span>
+                </button>
+                <span className="text-[10px] text-slate-400 mt-1.5 block text-center">Paste lines or upload CSV to import multiple delegates</span>
+              </div>
             </div>
 
             {/* Existing Delegates List Table with Full Edit & Delete Controls */}
@@ -861,16 +1092,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <p className="text-xs text-slate-500">Edit or remove enrolled delegates.</p>
                 </div>
 
-                {/* Search Bar */}
-                <div className="relative w-full sm:w-64">
-                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                  <input
-                    type="text"
-                    placeholder="Filter name or country..."
-                    value={delegateSearchQuery}
-                    onChange={(e) => setDelegateSearchQuery(e.target.value)}
-                    className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500/20"
-                  />
+                <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkTargetCommittee(selectedCommittee);
+                      setShowBulkImportModal(true);
+                    }}
+                    className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-1.5 rounded-xl text-xs transition shadow-xs"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-white" />
+                    <span>Bulk Import</span>
+                  </button>
+
+                  <div className="relative w-full sm:w-48">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      placeholder="Filter name or country..."
+                      value={delegateSearchQuery}
+                      onChange={(e) => setDelegateSearchQuery(e.target.value)}
+                      className="w-full bg-white border border-slate-300 rounded-xl pl-9 pr-3 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500/20"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1489,6 +1733,298 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 4: BULK DELEGATE IMPORT ================= */}
+      {showBulkImportModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl p-6 space-y-5 my-8">
+            <div className="flex justify-between items-center border-b pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-100 border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
+                  <Upload className="w-5 h-5 text-emerald-700" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-lg">
+                    Bulk Import Delegates
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Import multiple delegates via copy-paste or CSV file upload.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowBulkImportModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {bulkImportStatusMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-xs rounded-xl flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{bulkImportStatusMsg}</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Default Committee
+                </label>
+                <select
+                  value={bulkTargetCommittee}
+                  onChange={(e) => setBulkTargetCommittee(e.target.value as CommitteeId)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-900"
+                >
+                  {committeesList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} — {c.fullName}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-slate-400 mt-1 block">Used if committee is omitted in line data</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Upload CSV or TXT File
+                </label>
+                <label className="flex items-center justify-center gap-2 bg-slate-50 hover:bg-slate-100 border border-dashed border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-700 cursor-pointer transition">
+                  <FileUp className="w-4 h-4 text-indigo-600" />
+                  <span>Choose File (.csv, .txt)</span>
+                  <input
+                    type="file"
+                    accept=".csv,.txt,.tsv"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+                <span className="text-[10px] text-slate-400 mt-1 block">Auto-reads file contents into box below</span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Import Mode Action
+                </label>
+                <select
+                  value={bulkImportMode}
+                  onChange={(e) => setBulkImportMode(e.target.value as any)}
+                  className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-semibold text-slate-900"
+                >
+                  <option value="append">Append to Existing Delegates</option>
+                  <option value="replace_committee">Replace Only {bulkTargetCommittee} Delegates</option>
+                  <option value="replace_all">Replace ALL Delegates in System</option>
+                </select>
+                <span className="text-[10px] text-slate-400 mt-1 block">Choose whether to add or replace</span>
+              </div>
+            </div>
+
+            {/* Quick Templates Buttons */}
+            <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <span className="text-[11px] font-bold text-slate-600">Sample Data Templates:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkRawText(`SlNo, Committee, Delegate Name, Portfolio
+1, UNSC, Aarav Sharma, United States
+2, UNSC, Priya Patel, United Kingdom
+3, UNSC, Rohan Gupta, France
+4, UNSC, Vikram Singh, Russian Federation
+5, UNSC, Ananya Rao, China`);
+                }}
+                className="text-[10px] font-bold bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg transition"
+              >
+                UNSC Sample CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBulkRawText(`SlNo, Committee, Delegate Name, Portfolio
+1, UNSC, Aarav Sharma, United States
+2, UNHRC, Ananya Rao, India
+3, WHO, Rahul Verma, Germany
+4, UNESCO, Sanya Malhotra, Japan
+5, DISEC, Aditya Nair, Brazil`);
+                }}
+                className="text-[10px] font-bold bg-white text-indigo-700 hover:bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg transition"
+              >
+                Multi-Committee CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => setBulkRawText('')}
+                className="text-[10px] font-bold bg-white text-rose-600 hover:bg-rose-50 border border-rose-200 px-2.5 py-1 rounded-lg transition ml-auto"
+              >
+                Clear Text
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                Paste CSV / Tab-Separated Delegates Data:
+              </label>
+              <textarea
+                rows={6}
+                value={bulkRawText}
+                onChange={(e) => setBulkRawText(e.target.value)}
+                placeholder={`Paste lines here, e.g.:\nSlNo, Committee, Delegate Name, Portfolio\n1, UNSC, Aarav Sharma, United States\n2, UNHRC, Priya Patel, India\n3, WHO, Rohan Gupta, Germany`}
+                className="w-full bg-slate-50 border border-slate-300 focus:border-indigo-600 rounded-xl p-3 text-xs font-mono text-slate-900 outline-none leading-relaxed"
+              />
+              <span className="text-[10px] text-slate-400 mt-1 block">
+                Supported formats: <strong>SlNo, Committee, Name, Portfolio</strong> OR <strong>Name, Portfolio</strong> (Comma or Tab separated)
+              </span>
+            </div>
+
+            {/* Live Preview Table */}
+            {parsedBulkDelegates.length > 0 && (
+              <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 space-y-2 p-3">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-800 border-b border-slate-200 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Check className="w-4 h-4 text-emerald-600" />
+                    <span>Parsed Preview: {parsedBulkDelegates.length} Delegates Ready</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {Array.from(new Set(parsedBulkDelegates.map((d) => d.committeeId))).map((cid) => (
+                      <span key={cid} className="text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">
+                        {cid}: {parsedBulkDelegates.filter((d) => d.committeeId === cid).length}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="max-h-40 overflow-y-auto divide-y divide-slate-200">
+                  {parsedBulkDelegates.map((d, idx) => (
+                    <div key={idx} className="grid grid-cols-12 text-[11px] py-1.5 px-1 font-mono text-slate-700">
+                      <span className="col-span-1 font-bold text-slate-500">#{d.slNo}</span>
+                      <span className="col-span-2 font-black text-indigo-900">{d.committeeId}</span>
+                      <span className="col-span-5 font-medium text-slate-900 font-sans">{d.delegateName}</span>
+                      <span className="col-span-4 text-slate-600 font-sans">{d.portfolio}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end items-center gap-3 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setShowBulkImportModal(false)}
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isImportingBulk || parsedBulkDelegates.length === 0}
+                onClick={handleExecuteBulkImport}
+                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-md flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span>
+                  {isImportingBulk
+                    ? 'Importing...'
+                    : `Confirm Import (${parsedBulkDelegates.length} Delegates)`}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= MODAL 5: RESET JUDGES MARKS (SINGLE SHOT) ================= */}
+      {showResetMarksModal && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl shadow-2xl border border-rose-200 w-full max-w-lg p-6 space-y-5 my-8">
+            <div className="flex justify-between items-start border-b border-rose-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-rose-100 border border-rose-200 flex items-center justify-center text-rose-600 shrink-0">
+                  <AlertTriangle className="w-6 h-6 text-rose-600" />
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full w-fit mb-1">
+                    Single-Shot Critical Operation
+                  </div>
+                  <h3 className="font-black text-slate-900 text-lg">
+                    Reset Judges Evaluation Marks
+                  </h3>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowResetMarksModal(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {resetStatusMsg ? (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-xs rounded-2xl flex items-center gap-3">
+                <Check className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{resetStatusMsg}</span>
+              </div>
+            ) : (
+              <>
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4 text-xs space-y-2 text-rose-950">
+                  <p className="font-bold">
+                    ⚠️ Are you sure you want to clear all judge marks in a single shot?
+                  </p>
+                  <p className="text-rose-800 leading-relaxed">
+                    This action will permanently wipe and erase all entered evaluation marks, rubric scores, and comments for Judge 1, Judge 2, and Judge 3.
+                  </p>
+                  <div className="bg-white/80 border border-rose-200 p-2.5 rounded-xl font-mono text-[11px] font-bold text-rose-900 flex items-center justify-between">
+                    <span>Current Active Evaluations in Database:</span>
+                    <span className="bg-rose-200 text-rose-950 px-2 py-0.5 rounded">{Object.keys(scores).length} Score Entries</span>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Select Committee Scope to Reset:
+                  </label>
+                  <select
+                    value={resetTargetCommittee}
+                    onChange={(e) => setResetTargetCommittee(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-xl p-2.5 text-xs font-bold text-slate-900"
+                  >
+                    <option value="ALL">🔴 ALL COMMITTEES (Single-Shot System Reset)</option>
+                    {committeesList.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} — {c.fullName} Only
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex justify-end items-center gap-3 pt-3 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setShowResetMarksModal(false)}
+                    className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isResettingScores}
+                    onClick={handleExecuteResetMarks}
+                    className="px-6 py-2.5 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition shadow-md flex items-center gap-2"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                    <span>
+                      {isResettingScores
+                        ? 'Clearing Marks...'
+                        : resetTargetCommittee === 'ALL'
+                        ? 'Clear ALL Judges Marks (Single Shot)'
+                        : `Clear ${resetTargetCommittee} Marks`}
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
