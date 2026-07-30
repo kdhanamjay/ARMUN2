@@ -69,7 +69,7 @@ export const RUBRIC_CRITERIA: RubricCriterion[] = [
   },
   {
     id: 'relevance',
-    name: 'Relevance',
+    name: 'Relevance & Resolution',
     maxMarks: 10,
     description: 'Relevance of solutions, alignment with state policy, and constructive contributions.'
   },
@@ -125,50 +125,79 @@ export const DEFAULT_DELEGATES: Delegate[] = [
 
 // Helper to generate default judge PINs
 export const DEFAULT_JUDGE_PINS: Record<string, string> = {
-  // 1. UNSC (PIN Prefix: 111)
-  'UNSC-1': '1111',
-  'UNSC-2': '1112',
-  'UNSC-3': '1113',
+  'UNSC-1': '2768',
+  'UNSC-2': '6636',
+  'UNSC-3': '4413',
 
-  // 2. UNHRC (PIN Prefix: 222)
-  'UNHRC-1': '2221',
-  'UNHRC-2': '2222',
-  'UNHRC-3': '2223',
+  'UNHRC-1': '3626',
+  'UNHRC-2': '1260',
+  'UNHRC-3': '1800',
 
-  // 3. ILO (PIN Prefix: 333)
-  'ILO-1': '3331',
-  'ILO-2': '3332',
-  'ILO-3': '3333',
+  'ILO-1': '7155',
+  'ILO-2': '1522',
+  'ILO-3': '6241',
 
-  // 4. UNEP (PIN Prefix: 444)
-  'UNEP-1': '4441',
-  'UNEP-2': '4442',
-  'UNEP-3': '4443',
+  'UNEP-1': '5881',
+  'UNEP-2': '8720',
+  'UNEP-3': '3170',
 
-  // 5. DISEC (PIN Prefix: 555)
-  'DISEC-1': '5551',
-  'DISEC-2': '5552',
-  'DISEC-3': '5553',
+  'DISEC-1': '1942',
+  'DISEC-2': '4054',
+  'DISEC-3': '1308',
 
-  // 6. IMF (PIN Prefix: 666)
-  'IMF-1': '6661',
-  'IMF-2': '6662',
-  'IMF-3': '6663',
+  'IMF-1': '4906',
+  'IMF-2': '5361',
+  'IMF-3': '6327',
 
-  // 7. UNESCO (PIN Prefix: 777)
-  'UNESCO-1': '7771',
-  'UNESCO-2': '7772',
-  'UNESCO-3': '7773',
+  'UNESCO-1': '8985',
+  'UNESCO-2': '1397',
+  'UNESCO-3': '8781',
 
-  // 8. WHO (PIN Prefix: 888)
-  'WHO-1': '8881',
-  'WHO-2': '8882',
-  'WHO-3': '8883',
+  'WHO-1': '8375',
+  'WHO-2': '6901',
+  'WHO-3': '1169',
 
-  // 9. PRESS (PIN Prefix: 999)
-  'PRESS-1': '9991',
-  'PRESS-2': '9992',
-  'PRESS-3': '9993',
+  'PRESS-1': '7849',
+  'PRESS-2': '7384',
+  'PRESS-3': '5597',
+};
+
+export const DEFAULT_JUDGE_NAMES: Record<string, string> = {
+  'UNSC-1': 'Mr.Bhaskaran',
+  'UNSC-2': 'Mrs.Bharathi',
+  'UNSC-3': 'Bhanodaya Teacher',
+
+  'UNHRC-1': 'Mr.Nurulla',
+  'UNHRC-2': 'Mrs.Nishitha',
+  'UNHRC-3': 'SVIS Teacher',
+
+  'ILO-1': 'Mr.Satish',
+  'ILO-2': 'Mrs.P.Rajani',
+  'ILO-3': 'Rainbow Teacher',
+
+  'UNEP-1': 'Mrs.Sandhya Devi',
+  'UNEP-2': 'Mrs.Jyothsna',
+  'UNEP-3': 'SPY Teacher',
+
+  'DISEC-1': 'Mr.Charan',
+  'DISEC-2': 'Mr.Janakiram',
+  'DISEC-3': 'Vijayam Teacher',
+
+  'IMF-1': 'Mr.Mani Kumar',
+  'IMF-2': 'Mrs.T.Rajani',
+  'IMF-3': 'BVR Teacher',
+
+  'UNESCO-1': 'Mrs.Sasikala',
+  'UNESCO-2': 'Mr.Vijay',
+  'UNESCO-3': 'PES Teacher',
+
+  'WHO-1': 'Mrs.Jayanthi',
+  'WHO-2': 'Mr.Rajanna',
+  'WHO-3': 'Keshava Reddy Teacher',
+
+  'PRESS-1': 'Judge 1 Name',
+  'PRESS-2': 'Judge 2 Name',
+  'PRESS-3': 'Judge 3 Name',
 };
 
 export const DEFAULT_ADMIN_PIN = 'admin123';

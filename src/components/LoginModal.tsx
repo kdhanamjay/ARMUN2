@@ -5,9 +5,10 @@ import { Shield, Lock, Smartphone, ChevronRight, AlertCircle, KeyRound } from 'l
 
 interface LoginModalProps {
   onLogin: (payload: { role: UserRole; committeeId?: CommitteeId; judgeIndex?: 1 | 2 | 3; pin: string }) => Promise<{ success: boolean; message?: string }>;
+  judgeNames?: Record<string, string>;
 }
 
-export const LoginModal: React.FC<LoginModalProps> = ({ onLogin }) => {
+export const LoginModal: React.FC<LoginModalProps> = ({ onLogin, judgeNames }) => {
   const [role, setRole] = useState<UserRole>('judge');
   const [committeeId, setCommitteeId] = useState<CommitteeId>('UNSC');
   const [judgeIndex, setJudgeIndex] = useState<1 | 2 | 3>(1);
@@ -144,25 +145,33 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin }) => {
                   <label className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
                     Select Judge Slot
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[1, 2, 3].map((num) => (
-                      <button
-                        key={num}
-                        type="button"
-                        onClick={() => {
-                          setJudgeIndex(num as 1 | 2 | 3);
-                          setPin('');
-                        }}
-                        className={`p-3 rounded-xl border text-xs font-bold transition-all text-center flex flex-col items-center gap-1 ${
-                          judgeIndex === num
-                            ? 'bg-indigo-50 border-indigo-600 text-indigo-900 ring-2 ring-indigo-600/20'
-                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
-                        }`}
-                      >
-                        <span className="text-xs text-slate-500 font-normal">Slot</span>
-                        <span>Judge {num}</span>
-                      </button>
-                    ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {[1, 2, 3].map((num) => {
+                      const key = `${committeeId}-${num}`;
+                      const customName = judgeNames?.[key];
+                      return (
+                        <button
+                          key={num}
+                          type="button"
+                          onClick={() => {
+                            setJudgeIndex(num as 1 | 2 | 3);
+                            setPin('');
+                          }}
+                          className={`p-3 rounded-xl border text-xs font-bold transition-all text-center flex flex-col items-center justify-center gap-1 ${
+                            judgeIndex === num
+                              ? 'bg-indigo-50 border-indigo-600 text-indigo-900 ring-2 ring-indigo-600/20 shadow-xs'
+                              : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">
+                            Slot {num}
+                          </span>
+                          <span className="font-bold text-xs text-slate-900 truncate max-w-full">
+                            {customName && customName.trim() ? customName : `Judge ${num}`}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
               </>
@@ -175,7 +184,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin }) => {
                   ? 'Master Admin Password'
                   : role === 'admin'
                   ? 'Secretariat Admin Password'
-                  : `PIN for ${committeeId} - Judge ${judgeIndex}`}
+                  : `PIN for ${committeeId} - ${judgeNames?.[`${committeeId}-${judgeIndex}`] || `Judge ${judgeIndex}`}`}
               </label>
               <input
                 type="password"
@@ -218,7 +227,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin }) => {
                       ? 'Access Master Admin Panel'
                       : role === 'admin'
                       ? 'Access Secretariat Panel'
-                      : `Enter Judge ${judgeIndex} Portal`}
+                      : `Enter ${judgeNames?.[`${committeeId}-${judgeIndex}`] || `Judge ${judgeIndex}`} Portal`}
                   </span>
                   <ChevronRight className="w-4 h-4" />
                 </>

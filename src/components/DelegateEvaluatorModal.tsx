@@ -39,6 +39,7 @@ export const DelegateEvaluatorModal: React.FC<DelegateEvaluatorModalProps> = ({
   const [saving, setSaving] = useState(false);
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [showLockConfirm, setShowLockConfirm] = useState(false);
 
   useEffect(() => {
     const initial: Record<string, number> = {};
@@ -49,6 +50,7 @@ export const DelegateEvaluatorModal: React.FC<DelegateEvaluatorModalProps> = ({
     setComments(existingScore?.comments || '');
     setIsLocked(existingScore?.isLocked || false);
     setValidationError(null);
+    setShowLockConfirm(false);
   }, [delegate.id, existingScore]);
 
   // Calculate live total score out of 100
@@ -284,20 +286,46 @@ export const DelegateEvaluatorModal: React.FC<DelegateEvaluatorModalProps> = ({
                   disabled={saving}
                   onClick={() => handleSaveInternal(false)}
                   className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs px-4 py-2.5 rounded-xl border border-slate-300 transition shadow-xs"
+                  title="Temporarily save marks as draft so you can edit them later before locking"
                 >
                   <Save className="w-4 h-4 text-slate-600" />
-                  <span>Save Draft</span>
+                  <span>Save Draft (Temporary Save)</span>
                 </button>
 
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={() => handleSaveInternal(true)}
-                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
-                >
-                  <Lock className="w-4 h-4 text-indigo-200" />
-                  <span>Submit & Lock Evaluation</span>
-                </button>
+                {showLockConfirm ? (
+                  <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 p-1.5 rounded-xl text-xs font-bold text-rose-900 animate-in fade-in">
+                    <span className="text-[11px] font-semibold text-rose-800">Confirm lock sheet?</span>
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => {
+                        setShowLockConfirm(false);
+                        handleSaveInternal(true);
+                      }}
+                      className="bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg shadow-xs transition"
+                    >
+                      Yes, Lock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowLockConfirm(false)}
+                      className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs px-2.5 py-1.5 rounded-lg transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => setShowLockConfirm(true)}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20"
+                    title="Permanently lock this delegate evaluation sheet"
+                  >
+                    <Lock className="w-4 h-4 text-indigo-200" />
+                    <span>Save All & Lock</span>
+                  </button>
+                )}
               </>
             )}
 

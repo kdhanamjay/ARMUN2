@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { UserSession, CommitteeId, Delegate, RubricScore, UserRole, JudgePortalSchedule } from './types';
+import { UserSession, CommitteeId, Delegate, RubricScore, UserRole, JudgePortalSchedule, CommitteeInfo } from './types';
 import { Header } from './components/Header';
 import { LoginModal } from './components/LoginModal';
 import { JudgePortal } from './components/JudgePortal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { PhpExporterModal } from './components/PhpExporterModal';
 import { PrintableSheet } from './components/PrintableSheet';
-import { DEFAULT_DELEGATES, DEFAULT_JUDGE_PINS, DEFAULT_ADMIN_PIN } from './data/initialData';
+import { DEFAULT_DELEGATES, DEFAULT_JUDGE_PINS, DEFAULT_ADMIN_PIN, COMMITTEES as DEFAULT_COMMITTEES } from './data/initialData';
 
 export default function App() {
   const [session, setSession] = useState<UserSession>(() => {
@@ -17,9 +17,11 @@ export default function App() {
     return { role: 'guest' };
   });
 
+  const [committees, setCommittees] = useState<CommitteeInfo[]>(DEFAULT_COMMITTEES);
   const [delegates, setDelegates] = useState<Delegate[]>(DEFAULT_DELEGATES);
   const [scores, setScores] = useState<Record<string, RubricScore>>({});
   const [judgePins, setJudgePins] = useState<Record<string, string>>(DEFAULT_JUDGE_PINS);
+  const [judgeNames, setJudgeNames] = useState<Record<string, string>>({});
   const [adminPin, setAdminPin] = useState<string>(DEFAULT_ADMIN_PIN);
   const [judgePortalSchedule, setJudgePortalSchedule] = useState<JudgePortalSchedule>({
     isEnabled: true,
@@ -43,9 +45,11 @@ export default function App() {
       const res = await fetch('/api/admin/data');
       if (res.ok) {
         const data = await res.json();
+        if (data.committees) setCommittees(data.committees);
         if (data.delegates) setDelegates(data.delegates);
         if (data.scores) setScores(data.scores);
         if (data.judgePins) setJudgePins(data.judgePins);
+        if (data.judgeNames) setJudgeNames(data.judgeNames);
         if (data.adminPin) setAdminPin(data.adminPin);
         if (data.judgePortalSchedule) setJudgePortalSchedule(data.judgePortalSchedule);
       }
@@ -132,11 +136,14 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (res.ok) {
-        await loadAdminData();
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.message || 'Failed to save score');
       }
+      await loadAdminData();
     } catch (e) {
       console.error('Error saving score:', e);
+      throw e;
     }
   };
 
@@ -160,12 +167,30 @@ export default function App() {
   };
 
   const handleDeleteDelegate = async (delegateId: string) => {
-    await fetch('/api/admin/delegate', {
+    const res = await fetch('/api/admin/delegate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'delete', delegate: { id: delegateId } }),
+      body: JSON.stringify({ action: 'delete', delegate: { id: delegateId }, delegateId }),
     });
+    const data = await res.json();
+    if (data.delegates) setDelegates(data.delegates);
     await loadAdminData();
+  };
+
+  const handleBulkDeleteDelegates = async (payload: {
+    targetIds?: string[];
+    committeeId?: CommitteeId | 'ALL';
+    deleteAll?: boolean;
+  }) => {
+    const res = await fetch('/api/admin/delegate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'bulk_delete', ...payload }),
+    });
+    const data = await res.json();
+    if (data.delegates) setDelegates(data.delegates);
+    await loadAdminData();
+    return data;
   };
 
   const handleBulkImportDelegates = async (payload: {
@@ -181,13 +206,34 @@ export default function App() {
     await loadAdminData();
   };
 
-  const handleUpdatePins = async (payload: { newAdminPin?: string; newJudgePins?: Record<string, string> }) => {
+  const handleUpdatePins = async (payload: { newAdminPin?: string; newJudgePins?: Record<string, string>; newJudgeNames?: Record<string, string> }) => {
     await fetch('/api/admin/update-pins', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
     await loadAdminData();
+  };
+
+  const handleManageJudges = async (payload: {
+    action: 'edit' | 'delete' | 'bulk_add' | 'bulk_delete' | 'reset_passwords';
+    committeeId?: CommitteeId;
+    judgeIndex?: number;
+    judgeName?: string;
+    pin?: string;
+    judgesList?: any[];
+    targetKeys?: string[];
+  }) => {
+    const res = await fetch('/api/admin/manage-judges', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.judgePins) setJudgePins(data.judgePins);
+    if (data.judgeNames) setJudgeNames(data.judgeNames);
+    await loadAdminData();
+    return data;
   };
 
   const handleResetScores = async (committeeId?: CommitteeId) => {
@@ -197,6 +243,25 @@ export default function App() {
       body: JSON.stringify({ committeeId }),
     });
     await loadAdminData();
+  };
+
+  const handleManageCommittee = async (payload: {
+    action: 'add' | 'edit' | 'delete' | 'bulk_add' | 'bulk_replace' | 'bulk_delete';
+    committee?: any;
+    committeesList?: CommitteeInfo[];
+    id?: string;
+    targetIds?: string[];
+    deleteAll?: boolean;
+  }) => {
+    const res = await fetch('/api/admin/committee', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (data.committees) setCommittees(data.committees);
+    await loadAdminData();
+    return data;
   };
 
   const handleUpdateScore = async (payload: {
@@ -236,7 +301,7 @@ export default function App() {
 
       {/* Guest Login Screen */}
       {session.role === 'guest' && (
-        <LoginModal onLogin={handleLogin} />
+        <LoginModal onLogin={handleLogin} judgeNames={judgeNames} />
       )}
 
       {/* Judge View */}
@@ -253,17 +318,22 @@ export default function App() {
       {/* Admin / Master Admin View */}
       {(session.role === 'admin' || session.role === 'masteradmin') && (
         <AdminDashboard
+          committees={committees}
           delegates={delegates}
           scores={scores}
           judgePins={judgePins}
+          judgeNames={judgeNames}
           adminPin={adminPin}
           userRole={session.role}
           judgePortalSchedule={judgePortalSchedule}
+          onManageCommittee={handleManageCommittee}
           onAddDelegate={handleAddDelegate}
           onEditDelegate={handleEditDelegate}
           onDeleteDelegate={handleDeleteDelegate}
+          onBulkDeleteDelegates={handleBulkDeleteDelegates}
           onBulkImportDelegates={handleBulkImportDelegates}
           onUpdatePins={handleUpdatePins}
+          onManageJudges={handleManageJudges}
           onResetScores={handleResetScores}
           onOpenPhpExporter={() => setShowPhpExporter(true)}
           onOpenPrintModal={handleOpenPrintModal}
@@ -284,6 +354,8 @@ export default function App() {
           judgeIndex={session.judgeIndex || 1}
           delegates={delegates}
           scores={scores}
+          committees={committees}
+          judgeNames={judgeNames}
           onClose={() => setShowPrintModal(false)}
         />
       )}

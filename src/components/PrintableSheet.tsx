@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { CommitteeId, Delegate, RubricScore } from '../types';
-import { COMMITTEES, RUBRIC_CRITERIA } from '../data/initialData';
+import { CommitteeId, Delegate, RubricScore, CommitteeInfo } from '../types';
+import { COMMITTEES as DEFAULT_COMMITTEES, RUBRIC_CRITERIA } from '../data/initialData';
 import { Printer, X, Building2 } from 'lucide-react';
 
 interface PrintableSheetProps {
@@ -8,6 +8,8 @@ interface PrintableSheetProps {
   judgeIndex?: 1 | 2 | 3;
   delegates: Delegate[];
   scores: Record<string, RubricScore>;
+  committees?: CommitteeInfo[];
+  judgeNames?: Record<string, string>;
   onClose: () => void;
 }
 
@@ -16,16 +18,28 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
   judgeIndex = 1,
   delegates,
   scores,
+  committees,
+  judgeNames,
   onClose,
 }) => {
   const [selectedCommId, setSelectedCommId] = useState<CommitteeId>(initialCommitteeId || 'UNSC');
   const [sheetMode, setSheetMode] = useState<'master' | 'j1' | 'j2' | 'j3'>('master');
 
+  const availableCommittees = committees && Array.isArray(committees) && committees.length > 0
+    ? committees
+    : DEFAULT_COMMITTEES;
+
   const committeeDelegates = delegates.filter((d) => d.committeeId === selectedCommId);
-  const currentCommittee = COMMITTEES.find((c) => c.id === selectedCommId) || {
+  const currentCommittee = availableCommittees.find((c) => c.id === selectedCommId) || {
     id: selectedCommId,
     name: selectedCommId,
     fullName: `Committee ${selectedCommId}`,
+  };
+
+  const getJudgeName = (slot: 1 | 2 | 3) => {
+    const key = `${selectedCommId}-${slot}`;
+    const custom = judgeNames?.[key];
+    return custom && custom.trim() ? custom : `Judge ${slot}`;
   };
 
   // Compute aggregated scores & ranks for master sheet
@@ -80,11 +94,11 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
     return `Rank #${rank}`;
   };
 
-  const activeJudgeIndex = sheetMode === 'j1' ? 1 : sheetMode === 'j2' ? 2 : sheetMode === 'j3' ? 3 : judgeIndex;
+  const activeJudgeIndex: 1 | 2 | 3 = sheetMode === 'j1' ? 1 : sheetMode === 'j2' ? 2 : sheetMode === 'j3' ? 3 : (judgeIndex as 1 | 2 | 3);
 
   return (
-    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
-      <div className="bg-white text-slate-900 max-w-6xl w-full rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 overflow-y-auto printable-modal-overlay">
+      <div className="bg-white text-slate-900 max-w-6xl w-full rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh] printable-modal-box">
         
         {/* Print Controls Header (Hidden during actual print) */}
         <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 print:hidden">
@@ -96,9 +110,9 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
                 onChange={(e) => setSelectedCommId(e.target.value as CommitteeId)}
                 className="bg-slate-900 text-white font-bold text-xs p-1.5 rounded-lg border border-slate-700 outline-none"
               >
-                {COMMITTEES.map((c) => (
+                {availableCommittees.map((c) => (
                   <option key={c.id} value={c.id}>
-                    {c.name} — {c.fullName}
+                    {c.id} — {c.fullName}
                   </option>
                 ))}
               </select>
@@ -119,7 +133,7 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
                   sheetMode === 'j1' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
                 }`}
               >
-                Judge 1 Sheet
+                {getJudgeName(1)} Sheet
               </button>
               <button
                 onClick={() => setSheetMode('j2')}
@@ -127,7 +141,7 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
                   sheetMode === 'j2' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
                 }`}
               >
-                Judge 2 Sheet
+                {getJudgeName(2)} Sheet
               </button>
               <button
                 onClick={() => setSheetMode('j3')}
@@ -135,7 +149,7 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
                   sheetMode === 'j3' ? 'bg-indigo-600 text-white' : 'text-slate-300 hover:text-white'
                 }`}
               >
-                Judge 3 Sheet
+                {getJudgeName(3)} Sheet
               </button>
             </div>
           </div>
@@ -171,7 +185,7 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
             </h2>
             <div className="inline-block bg-slate-100 border border-slate-900 px-4 py-1 text-sm font-black mt-1">
               {currentCommittee.id} — {currentCommittee.fullName}
-              {sheetMode !== 'master' && ` (Judge ${activeJudgeIndex} Rubric Matrix)`}
+              {sheetMode !== 'master' && ` (${getJudgeName(activeJudgeIndex)} Rubric Matrix)`}
             </div>
           </div>
 
@@ -183,9 +197,9 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
                   <th className="border-r-2 border-slate-900 p-2 w-10">SL</th>
                   <th className="border-r-2 border-slate-900 p-2 text-left">Delegate Student Name</th>
                   <th className="border-r-2 border-slate-900 p-2 text-left">Country / Portfolio</th>
-                  <th className="border-r-2 border-slate-900 p-2 w-16">Judge 1 (100)</th>
-                  <th className="border-r-2 border-slate-900 p-2 w-16">Judge 2 (100)</th>
-                  <th className="border-r-2 border-slate-900 p-2 w-16">Judge 3 (100)</th>
+                  <th className="border-r-2 border-slate-900 p-2 w-20">{getJudgeName(1)} (100)</th>
+                  <th className="border-r-2 border-slate-900 p-2 w-20">{getJudgeName(2)} (100)</th>
+                  <th className="border-r-2 border-slate-900 p-2 w-20">{getJudgeName(3)} (100)</th>
                   <th className="border-r-2 border-slate-900 p-2 w-24 bg-purple-100 text-purple-950 font-black">
                     Total Marks (300)
                   </th>
@@ -285,9 +299,9 @@ export const PrintableSheet: React.FC<PrintableSheetProps> = ({
 
           {/* Footer Signature Lines */}
           <div className="mt-12 flex justify-between items-center text-xs font-bold text-slate-800 pt-8 border-t border-slate-400">
-            <div>Judge 1 Signature: ____________________</div>
-            <div>Judge 2 Signature: ____________________</div>
-            <div>Judge 3 Signature: ____________________</div>
+            <div>{getJudgeName(1)} Sig: ____________________</div>
+            <div>{getJudgeName(2)} Sig: ____________________</div>
+            <div>{getJudgeName(3)} Sig: ____________________</div>
             <div>Secretariat Admin: ____________________</div>
           </div>
 

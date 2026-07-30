@@ -6,7 +6,8 @@ import { DEFAULT_JUDGE_PINS } from '../data/initialData';
 export function exportCredentialsPDF(
   adminPin: string,
   judgePins: Record<string, string>,
-  committees: CommitteeInfo[]
+  committees: CommitteeInfo[],
+  judgeNames?: Record<string, string>
 ) {
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -77,11 +78,13 @@ export function exportCredentialsPDF(
     [1, 2, 3].forEach((j) => {
       const key = `${c.id}-${j}`;
       const pin = judgePins[key] || DEFAULT_JUDGE_PINS[key] || '1111';
+      const name = judgeNames?.[key] || `Judge ${j}`;
       const username = `${c.id.toLowerCase()}_judge${j}`;
       judgeRows.push([
         c.id,
         c.name,
         `Judge ${j}`,
+        name,
         username,
         pin,
       ]);
@@ -90,7 +93,7 @@ export function exportCredentialsPDF(
 
   autoTable(doc, {
     startY: lastY + 4,
-    head: [['Committee Code', 'Committee Name', 'Judge Slot', 'System Username', 'Security PIN / Password']],
+    head: [['Committee Code', 'Committee Name', 'Judge Slot', 'Judge Name', 'System Username', 'Security PIN / Password']],
     body: judgeRows,
     theme: 'striped',
     headStyles: {
@@ -110,6 +113,7 @@ export function exportCredentialsPDF(
       0: { fontStyle: 'bold' },
       3: { fontStyle: 'bold' },
       4: { fontStyle: 'bold' },
+      5: { fontStyle: 'bold' },
     },
   });
 

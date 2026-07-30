@@ -367,7 +367,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_scores'])) {
         'leadership_score' => 'Leadership & Initiative',
         'public_speaking_score' => 'Public Speaking & Rhetoric',
         'impact_score' => 'Overall Impact',
-        'relevance_score' => 'Relevance'
+        'relevance_score' => 'Relevance & Resolution'
     ];
 
     $scores = [];
@@ -541,7 +541,7 @@ foreach($savedScoresRaw as $s) {
                             'leadership_score' => '7. Leadership (10M)',
                             'public_speaking_score' => '8. Public Spk (10M)',
                             'impact_score' => '9. Impact (10M)',
-                            'relevance_score' => '10. Relevance (10M)'
+                            'relevance_score' => '10. Relevance & Resolution (10M)'
                         ];
                         foreach($rubricsList as $field => $label):
                             $val = $score[$field] ?? '';

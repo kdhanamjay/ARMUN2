@@ -1,1 +1,48 @@
 @import "tailwindcss";
+
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* Hide print control bars, buttons, and close icons */
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Expand the overlay to cover full printed sheet with no dark backdrop */
+  .printable-modal-overlay {
+    position: absolute !important;
+    inset: 0 !important;
+    background: #ffffff !important;
+    backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    z-index: 9999 !important;
+  }
+
+  .printable-modal-box {
+    max-width: 100% !important;
+    max-height: none !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  .printable-area {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #ffffff !important;
+    color: #000000 !important;
+    overflow: visible !important;
+  }
+
+  @page {
+    margin: 10mm;
+    size: auto;
+  }
+}

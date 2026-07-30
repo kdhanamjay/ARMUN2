@@ -39,11 +39,11 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
   const [selectedDelegateIndex, setSelectedDelegateIndex] = useState<number | null>(null);
   const [isPortalDisabled, setIsPortalDisabled] = useState(false);
   const [portalDisabledReason, setPortalDisabledReason] = useState('');
+  const [savingAll, setSavingAll] = useState(false);
+  const [showLockAllModal, setShowLockAllModal] = useState(false);
 
   // Local state for direct in-table matrix cell editing
   const [matrixScores, setMatrixScores] = useState<Record<string, MatrixRowState>>({});
-
-  const [savingAll, setSavingAll] = useState(false);
 
   // Anti-Screenshot & Screen Capture Protection Hook
   const { isScreenProtected, securityAlert } = useAntiScreenshot(true);
@@ -129,8 +129,8 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
     return Object.values(item.criteriaScores).reduce<number>((acc, val) => acc + (Number(val) || 0), 0);
   };
 
-  // Save single delegate matrix row
-  const handleSaveMatrixRow = async (delegateId: string) => {
+  // Save single delegate matrix row with explicit lock status
+  const handleSaveMatrixRow = async (delegateId: string, shouldLock: boolean) => {
     const item = matrixScores[delegateId];
     if (!item) return;
 
@@ -146,7 +146,7 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
         judgeIndex,
         criteriaScores: item.criteriaScores,
         comments: item.comments,
-        isLocked: true, // Always lock upon judge save
+        isLocked: shouldLock,
       });
 
       const total = getDelegateMatrixTotal(delegateId);
@@ -160,7 +160,7 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
           criteriaScores: item.criteriaScores,
           totalMarks: total,
           comments: item.comments,
-          isLocked: true,
+          isLocked: shouldLock,
           updatedAt: new Date().toISOString(),
         },
       }));
@@ -169,7 +169,7 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
         ...prev,
         [delegateId]: {
           ...prev[delegateId],
-          isLocked: true,
+          isLocked: shouldLock,
           isDirty: false,
           isSaving: false,
           isSaved: true,
@@ -184,12 +184,9 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
     }
   };
 
-  // Save all modified matrix rows and lock them
-  const handleSaveAllMatrix = async () => {
-    if (isPortalDisabled) {
-      alert('Judge Evaluation Portal is currently disabled by Master Admin.');
-      return;
-    }
+  // Save Draft Marks (Temporary save without locking - allows future edits)
+  const handleSaveDrafts = async () => {
+    if (isPortalDisabled) return;
 
     const targetIds = Object.keys(matrixScores).filter((id) => {
       const item = matrixScores[id];
@@ -197,14 +194,42 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
       return item.isDirty || Object.values(item.criteriaScores).some((v) => Number(v) > 0);
     });
 
-    if (targetIds.length === 0) {
-      alert('All entered evaluations are already saved and locked.');
-      return;
-    }
+    if (targetIds.length === 0) return;
 
     setSavingAll(true);
     for (const id of targetIds) {
-      await handleSaveMatrixRow(id);
+      await handleSaveMatrixRow(id, false); // isLocked = false (Temporary draft save)
+    }
+    setSavingAll(false);
+  };
+
+  // Open modal for Lock All confirmation
+  const handleOpenLockAllModal = () => {
+    if (isPortalDisabled) return;
+    const targetIds = Object.keys(matrixScores).filter((id) => {
+      const item = matrixScores[id];
+      return item && !item.isLocked;
+    });
+
+    if (targetIds.length === 0) return;
+    setShowLockAllModal(true);
+  };
+
+  // Execute Save All & Lock for all unlocked rows
+  const executeSaveAndLockAll = async () => {
+    setShowLockAllModal(false);
+    if (isPortalDisabled) return;
+
+    const targetIds = Object.keys(matrixScores).filter((id) => {
+      const item = matrixScores[id];
+      return item && !item.isLocked;
+    });
+
+    if (targetIds.length === 0) return;
+
+    setSavingAll(true);
+    for (const id of targetIds) {
+      await handleSaveMatrixRow(id, true); // isLocked = true
     }
     setSavingAll(false);
   };
@@ -220,7 +245,7 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
       judgeIndex,
       criteriaScores: payload.criteriaScores,
       comments: payload.comments,
-      isLocked: true, // Always lock upon judge save
+      isLocked: payload.isLocked, // Respect lock state from modal!
     });
 
     let total = 0;
@@ -235,7 +260,7 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
         criteriaScores: payload.criteriaScores,
         totalMarks: total,
         comments: payload.comments,
-        isLocked: true,
+        isLocked: payload.isLocked,
         updatedAt: new Date().toISOString(),
       },
     }));
@@ -245,7 +270,7 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
       [currentDelegate.id]: {
         criteriaScores: payload.criteriaScores,
         comments: payload.comments,
-        isLocked: true,
+        isLocked: payload.isLocked,
         isDirty: false,
         isSaving: false,
         isSaved: true,
@@ -279,12 +304,18 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
   const gradedCount = Object.keys(scores).length;
   const progressPercent = totalDelegatesCount > 0 ? Math.round((gradedCount / totalDelegatesCount) * 100) : 0;
   
-  const savableRows = Object.keys(matrixScores).filter((id) => {
+  const unlockedRows = Object.keys(matrixScores).filter((id) => {
+    const item = matrixScores[id];
+    return item && !item.isLocked;
+  });
+  const hasUnlockedRows = unlockedRows.length > 0;
+
+  const savableDraftRows = Object.keys(matrixScores).filter((id) => {
     const item = matrixScores[id];
     if (!item || item.isLocked) return false;
     return item.isDirty || Object.values(item.criteriaScores).some((v) => Number(v) > 0);
   });
-  const hasSavableRows = savableRows.length > 0;
+  const hasDraftableRows = savableDraftRows.length > 0;
 
   const currentActiveDelegate = selectedDelegateIndex !== null ? filteredDelegates[selectedDelegateIndex] : null;
 
@@ -364,20 +395,35 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
               </div>
             </div>
 
-            {/* Save All Button */}
-            {hasSavableRows ? (
-              <button
-                onClick={handleSaveAllMatrix}
-                disabled={savingAll || isPortalDisabled}
-                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold text-xs px-4 py-3 rounded-xl transition shadow-md shadow-indigo-600/20 shrink-0 disabled:opacity-50"
-              >
-                <Save className="w-4 h-4" />
-                <span>{savingAll ? 'Saving & Locking...' : `Save All Marks (${savableRows.length})`}</span>
-              </button>
+            {/* Save Draft & Save All & Lock Action Buttons */}
+            {hasUnlockedRows ? (
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSaveDrafts}
+                  disabled={savingAll || isPortalDisabled || !hasDraftableRows}
+                  className="flex items-center gap-1.5 bg-slate-100 hover:bg-slate-200 active:bg-slate-300 text-slate-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 transition shadow-xs disabled:opacity-40"
+                  title="Temporarily save entered marks so you can edit them later before locking"
+                >
+                  <Save className="w-4 h-4 text-slate-600" />
+                  <span>{savingAll ? 'Saving...' : 'Save Draft (Temporary)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenLockAllModal}
+                  disabled={savingAll || isPortalDisabled}
+                  className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition shadow-md shadow-indigo-600/20 disabled:opacity-50"
+                  title="Permanently lock entered marks for all delegates"
+                >
+                  <Lock className="w-4 h-4 text-indigo-200" />
+                  <span>{savingAll ? 'Locking...' : `Save All & Lock (${unlockedRows.length})`}</span>
+                </button>
+              </div>
             ) : (
-              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 font-bold text-xs px-3.5 py-3 rounded-xl border border-emerald-200 shrink-0">
+              <div className="flex items-center gap-1.5 bg-emerald-50 text-emerald-800 font-bold text-xs px-3.5 py-2.5 rounded-xl border border-emerald-200 shrink-0">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>All Entered Marks Saved & Locked</span>
+                <span>All Evaluation Sheets Saved & Locked</span>
               </div>
             )}
           </div>
@@ -537,13 +583,18 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
                         <div className="flex items-center justify-center gap-1.5">
                           <span>{liveTotal}</span>
                           {item.isLocked ? (
-                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300" title="Locked by Save All Marks">
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded border border-amber-300" title="Locked evaluation sheet">
                               <Lock className="w-2.5 h-2.5 text-amber-600" />
                               <span>Locked</span>
                             </span>
                           ) : item.isDirty ? (
-                            <span className="inline-flex items-center text-[9px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded">
+                            <span className="inline-flex items-center text-[9px] font-bold text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded" title="Unsaved changes">
                               Modified
+                            </span>
+                          ) : item.isSaved ? (
+                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-300" title="Draft saved - editable before locking">
+                              <Save className="w-2.5 h-2.5 text-emerald-600" />
+                              <span>Draft</span>
                             </span>
                           ) : null}
                         </div>
@@ -627,6 +678,47 @@ export const JudgePortal: React.FC<JudgePortalProps> = ({
         )}
 
       </main>
+
+      {/* Lock All Confirmation Dialog Modal */}
+      {showLockAllModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white max-w-md w-full rounded-2xl shadow-2xl border border-slate-200 p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
+              <Lock className="w-6 h-6 text-amber-600" />
+            </div>
+
+            <div>
+              <h3 className="text-lg font-black text-slate-900">
+                Confirm Save All & Lock Evaluation Sheets
+              </h3>
+              <p className="text-xs text-slate-600 mt-1 font-medium leading-relaxed">
+                You are about to permanently lock evaluation sheets for <strong>{unlockedRows.length} delegate(s)</strong> in committee <strong>{committeeId}</strong>.
+              </p>
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl mt-3 text-xs text-amber-900 font-semibold flex items-center gap-2">
+                <span>⚠️ Once locked, you cannot edit marks unless reset by Master Admin.</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-2 justify-end">
+              <button
+                type="button"
+                onClick={() => setShowLockAllModal(false)}
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-bold hover:bg-slate-100 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={executeSaveAndLockAll}
+                disabled={savingAll}
+                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold transition shadow-md shadow-indigo-600/20 disabled:opacity-50"
+              >
+                {savingAll ? 'Locking...' : `Yes, Lock All (${unlockedRows.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delegate Evaluator Sheet Modal */}
       {currentActiveDelegate && selectedDelegateIndex !== null && (

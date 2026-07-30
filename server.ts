@@ -2,13 +2,15 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import { CommitteeId, Delegate, RubricScore } from './src/types.js';
-import { DEFAULT_DELEGATES, DEFAULT_JUDGE_PINS, DEFAULT_ADMIN_PIN } from './src/data/initialData.js';
+import { CommitteeId, Delegate, RubricScore, CommitteeInfo } from './src/types.js';
+import { DEFAULT_DELEGATES, DEFAULT_JUDGE_PINS, DEFAULT_JUDGE_NAMES, DEFAULT_ADMIN_PIN, COMMITTEES as DEFAULT_COMMITTEES } from './src/data/initialData.js';
 
 interface StoreData {
+  committees: CommitteeInfo[];
   delegates: Delegate[];
   scores: Record<string, RubricScore>; // key: `${delegateId}_J${judgeIndex}`
   judgePins: Record<string, string>; // key: `${committeeId}-${judgeIndex}`
+  judgeNames: Record<string, string>; // key: `${committeeId}-${judgeIndex}`
   adminPin: string;
   judgePortalSchedule: {
     isEnabled: boolean;
@@ -31,9 +33,11 @@ function loadStore(): StoreData {
     }
   }
   return {
+    committees: loaded.committees && Array.isArray(loaded.committees) && loaded.committees.length > 0 ? loaded.committees : [...DEFAULT_COMMITTEES],
     delegates: loaded.delegates || [...DEFAULT_DELEGATES],
     scores: loaded.scores || {},
-    judgePins: loaded.judgePins || { ...DEFAULT_JUDGE_PINS },
+    judgePins: { ...DEFAULT_JUDGE_PINS, ...(loaded.judgePins || {}) },
+    judgeNames: { ...DEFAULT_JUDGE_NAMES, ...(loaded.judgeNames || {}) },
     adminPin: loaded.adminPin || DEFAULT_ADMIN_PIN,
     judgePortalSchedule: loaded.judgePortalSchedule || {
       isEnabled: true,
@@ -143,12 +147,14 @@ async function startServer() {
       const validPin = store.judgePins[key] || DEFAULT_JUDGE_PINS[key];
 
       if (pin === validPin) {
+        const customName = store.judgeNames[key];
+        const displayName = customName ? `${customName} (${committeeId})` : `Judge ${judgeIndex} (${committeeId})`;
         return res.json({
           success: true,
           role: 'judge',
           committeeId,
           judgeIndex: Number(judgeIndex),
-          judgeName: `Judge ${judgeIndex} (${committeeId})`,
+          judgeName: displayName,
           token: `judge_${committeeId}_J${judgeIndex}_${Date.now()}`,
         });
       }
@@ -216,7 +222,7 @@ async function startServer() {
     const scoreKey = `${delegateId}_J${judgeIndex}`;
 
     // Check if score was locked earlier
-    if (store.scores[scoreKey]?.isLocked && !isLocked) {
+    if (store.scores[scoreKey]?.isLocked) {
       return res.status(403).json({ success: false, message: 'This evaluation has been locked and submitted.' });
     }
 
@@ -285,12 +291,126 @@ async function startServer() {
   app.get('/api/admin/data', (req, res) => {
     res.json({
       success: true,
+      committees: store.committees || [...DEFAULT_COMMITTEES],
       delegates: store.delegates,
       scores: store.scores,
       judgePins: store.judgePins,
+      judgeNames: store.judgeNames || {},
       adminPin: store.adminPin,
       judgePortalSchedule: store.judgePortalSchedule,
     });
+  });
+
+  // Admin Committee Management Endpoint (Add, Edit, Delete, Bulk Add, Bulk Delete)
+  app.post('/api/admin/committee', (req, res) => {
+    const { action, committee, committeesList, id, targetIds, deleteAll } = req.body;
+
+    // Single Add Committee
+    if (action === 'add' && committee) {
+      const commId = String(committee.id).trim().toUpperCase();
+      if (!store.committees.some((c) => c.id === commId)) {
+        const newComm: CommitteeInfo = {
+          id: commId,
+          name: committee.name || commId,
+          fullName: committee.fullName || committee.name || commId,
+        };
+        store.committees.push(newComm);
+        saveStore(store);
+        return res.json({ success: true, committees: store.committees, committee: newComm });
+      }
+      return res.status(400).json({ success: false, message: `Committee ${commId} already exists!` });
+    }
+
+    // Single Edit Committee
+    if (action === 'edit' && committee) {
+      const oldId = String(committee.oldId || committee.id).trim().toUpperCase();
+      const newId = String(committee.id || oldId).trim().toUpperCase();
+      const idx = store.committees.findIndex((c) => c.id === oldId);
+
+      if (idx !== -1) {
+        store.committees[idx] = {
+          id: newId,
+          name: committee.name || newId,
+          fullName: committee.fullName || committee.name || newId,
+        };
+
+        // If committee code changed, update associated delegates
+        if (oldId !== newId) {
+          store.delegates.forEach((d) => {
+            if (d.committeeId === oldId) {
+              d.committeeId = newId;
+            }
+          });
+        }
+
+        saveStore(store);
+        return res.json({ success: true, committees: store.committees, message: 'Committee updated successfully' });
+      }
+      return res.status(404).json({ success: false, message: 'Committee not found' });
+    }
+
+    // Single Delete Committee
+    if (action === 'delete') {
+      const commIdToDelete = String(id || committee?.id).trim().toUpperCase();
+      if (commIdToDelete) {
+        store.committees = store.committees.filter((c) => c.id !== commIdToDelete);
+
+        // Delete associated delegates if requested or by default
+        store.delegates = store.delegates.filter((d) => d.committeeId !== commIdToDelete);
+
+        saveStore(store);
+        return res.json({ success: true, committees: store.committees, message: `Committee ${commIdToDelete} deleted successfully` });
+      }
+    }
+
+    // Bulk Add Committees
+    if ((action === 'bulk_add' || action === 'bulk_append') && Array.isArray(committeesList)) {
+      committeesList.forEach((c: any) => {
+        if (c.id) {
+          const commId = String(c.id).trim().toUpperCase();
+          const existingIdx = store.committees.findIndex((item) => item.id === commId);
+          const newComm: CommitteeInfo = {
+            id: commId,
+            name: c.name || commId,
+            fullName: c.fullName || c.name || commId,
+          };
+          if (existingIdx !== -1) {
+            store.committees[existingIdx] = newComm;
+          } else {
+            store.committees.push(newComm);
+          }
+        }
+      });
+      saveStore(store);
+      return res.json({ success: true, committees: store.committees, message: 'Bulk committees added successfully' });
+    }
+
+    // Bulk Replace Committees
+    if (action === 'bulk_replace' && Array.isArray(committeesList)) {
+      store.committees = committeesList.map((c: any) => ({
+        id: String(c.id).trim().toUpperCase(),
+        name: c.name || c.id,
+        fullName: c.fullName || c.name || c.id,
+      }));
+      saveStore(store);
+      return res.json({ success: true, committees: store.committees, message: 'Committees replaced successfully' });
+    }
+
+    // Bulk Delete Committees
+    if (action === 'bulk_delete') {
+      if (deleteAll) {
+        store.committees = [];
+      } else if (Array.isArray(targetIds) && targetIds.length > 0) {
+        const idSet = new Set(targetIds.map((t) => String(t).trim().toUpperCase()));
+        store.committees = store.committees.filter((c) => !idSet.has(c.id));
+        // Delete delegates in deleted committees
+        store.delegates = store.delegates.filter((d) => !idSet.has(d.committeeId));
+      }
+      saveStore(store);
+      return res.json({ success: true, committees: store.committees, message: 'Committees bulk deleted successfully' });
+    }
+
+    res.status(400).json({ success: false, message: 'Invalid committee action' });
   });
 
   // Schedule & Bulk Toggle Judge Portal Access (Master Admin)
@@ -336,16 +456,47 @@ async function startServer() {
       }
     }
 
-    if (action === 'delete' && delegate?.id) {
-      store.delegates = store.delegates.filter((d) => d.id !== delegate.id);
-      // Remove associated scores
-      Object.keys(store.scores).forEach((k) => {
-        if (k.startsWith(`${delegate.id}_`)) {
-          delete store.scores[k];
-        }
-      });
+    if (action === 'delete') {
+      const idToDelete = delegate?.id || req.body.id || req.body.delegateId;
+      if (idToDelete) {
+        store.delegates = store.delegates.filter((d) => String(d.id) !== String(idToDelete));
+        // Remove associated scores
+        Object.keys(store.scores).forEach((k) => {
+          if (k.startsWith(`${idToDelete}_`)) {
+            delete store.scores[k];
+          }
+        });
+        saveStore(store);
+        return res.json({ success: true, delegates: store.delegates, message: 'Delegate deleted' });
+      }
+    }
+
+    if (action === 'bulk_delete') {
+      const { targetIds, committeeId, deleteAll } = req.body;
+      if (deleteAll || committeeId === 'ALL') {
+        store.delegates = [];
+        store.scores = {};
+      } else if (Array.isArray(targetIds) && targetIds.length > 0) {
+        const idSet = new Set(targetIds.map(String));
+        store.delegates = store.delegates.filter((d) => !idSet.has(String(d.id)));
+        Object.keys(store.scores).forEach((k) => {
+          const delegateIdInKey = k.split('_')[0];
+          if (idSet.has(delegateIdInKey)) {
+            delete store.scores[k];
+          }
+        });
+      } else if (committeeId) {
+        const removedDelIds = new Set(store.delegates.filter((d) => d.committeeId === committeeId).map((d) => String(d.id)));
+        store.delegates = store.delegates.filter((d) => d.committeeId !== committeeId);
+        Object.keys(store.scores).forEach((k) => {
+          const delegateIdInKey = k.split('_')[0];
+          if (removedDelIds.has(delegateIdInKey)) {
+            delete store.scores[k];
+          }
+        });
+      }
       saveStore(store);
-      return res.json({ success: true, message: 'Delegate deleted' });
+      return res.json({ success: true, delegates: store.delegates, message: 'Delegates bulk deleted successfully' });
     }
 
     if (action === 'bulk_replace' && Array.isArray(delegatesList)) {
@@ -371,15 +522,107 @@ async function startServer() {
 
   // Admin PIN management & Reset
   app.post('/api/admin/update-pins', (req, res) => {
-    const { newAdminPin, newJudgePins } = req.body;
+    const { newAdminPin, newJudgePins, newJudgeNames } = req.body;
     if (newAdminPin) {
       store.adminPin = newAdminPin;
     }
     if (newJudgePins) {
       store.judgePins = { ...store.judgePins, ...newJudgePins };
     }
+    if (newJudgeNames) {
+      store.judgeNames = { ...store.judgeNames, ...newJudgeNames };
+    }
     saveStore(store);
-    res.json({ success: true, message: 'PINs updated successfully' });
+    res.json({ success: true, message: 'PINs and Judge names updated successfully' });
+  });
+
+  // Admin Judge Management Endpoint (Edit, Delete, Bulk Add, Bulk Delete, Reset Passwords)
+  app.post('/api/admin/manage-judges', (req, res) => {
+    const { action, committeeId, judgeIndex, judgeName, pin, judgesList, targetKeys } = req.body;
+
+    // Single judge edit / update
+    if (action === 'edit' && committeeId && judgeIndex) {
+      const key = `${committeeId}-${judgeIndex}`;
+      if (judgeName !== undefined) store.judgeNames[key] = judgeName;
+      if (pin !== undefined) store.judgePins[key] = pin;
+      saveStore(store);
+      return res.json({ success: true, message: 'Judge updated successfully', judgeNames: store.judgeNames, judgePins: store.judgePins });
+    }
+
+    // Single judge delete
+    if (action === 'delete' && committeeId && judgeIndex) {
+      const key = `${committeeId}-${judgeIndex}`;
+      delete store.judgeNames[key];
+      delete store.judgePins[key];
+      saveStore(store);
+      return res.json({ success: true, message: 'Judge deleted successfully', judgeNames: store.judgeNames, judgePins: store.judgePins });
+    }
+
+    // Bulk add / update judges
+    if (action === 'bulk_add' && Array.isArray(judgesList)) {
+      judgesList.forEach((item: any) => {
+        if (item.committeeId && item.judgeIndex) {
+          const key = `${item.committeeId}-${item.judgeIndex}`;
+          if (item.judgeName !== undefined) store.judgeNames[key] = item.judgeName;
+          if (item.pin) {
+            store.judgePins[key] = String(item.pin);
+          } else if (!store.judgePins[key]) {
+            store.judgePins[key] = Math.floor(1000 + Math.random() * 9000).toString();
+          }
+        }
+      });
+      saveStore(store);
+      return res.json({ success: true, message: 'Bulk judges added successfully', judgeNames: store.judgeNames, judgePins: store.judgePins });
+    }
+
+    // Bulk delete judges
+    if (action === 'bulk_delete') {
+      if (Array.isArray(targetKeys) && targetKeys.length > 0) {
+        targetKeys.forEach((key: string) => {
+          delete store.judgeNames[key];
+          delete store.judgePins[key];
+        });
+      } else if (committeeId) {
+        Object.keys(store.judgePins).forEach((k) => {
+          if (k.startsWith(`${committeeId}-`)) {
+            delete store.judgePins[k];
+            delete store.judgeNames[k];
+          }
+        });
+      }
+      saveStore(store);
+      return res.json({ success: true, message: 'Judges deleted in bulk', judgeNames: store.judgeNames, judgePins: store.judgePins });
+    }
+
+    // Reset judge passwords with unique random 4-digit numeric PINs
+    if (action === 'reset_passwords') {
+      const usedPins = new Set<string>();
+      const keysToReset = Array.isArray(targetKeys) && targetKeys.length > 0
+        ? targetKeys
+        : Object.keys(store.judgePins);
+
+      // If targetKeys is empty, default to standard committee judge slots (3 judges per committee)
+      if (keysToReset.length === 0) {
+        const standardCommittees = ['UNSC', 'UNHRC', 'ILO', 'UNEP', 'DISEC', 'IMF', 'UNESCO', 'WHO', 'PRESS'];
+        standardCommittees.forEach((c) => {
+          [1, 2, 3].forEach((j) => keysToReset.push(`${c}-${j}`));
+        });
+      }
+
+      keysToReset.forEach((key) => {
+        let randPin = '';
+        do {
+          randPin = Math.floor(1000 + Math.random() * 9000).toString();
+        } while (usedPins.has(randPin));
+        usedPins.add(randPin);
+        store.judgePins[key] = randPin;
+      });
+
+      saveStore(store);
+      return res.json({ success: true, message: 'All judge passwords reset with unique 4-digit PINs!', judgePins: store.judgePins });
+    }
+
+    res.status(400).json({ success: false, message: 'Invalid judge management action' });
   });
 
   app.post('/api/admin/reset-scores', (req, res) => {
